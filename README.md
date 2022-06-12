@@ -27,4 +27,4 @@ attached the code itself in .py code and an .html file to view example results
 17. creating heritage table consisting every ancestor/predecessor relationship in the data, including but not exclusive to immediate relationships
 18. marging/joining the relevant tables together to create a more insightful data table
 19. creating a similar summary table, now using all of the data that is at the top of their site_code or environment or campus_code
-20. _db upload of the edited table - top_summary
+20. _db upload of the edited table - top_summary_
