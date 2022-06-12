@@ -42,7 +42,7 @@ today = date.today()
 # In[19]:
 
 
-engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
 con = engine.connect()
 
 
@@ -208,7 +208,7 @@ def get_subnet_summary(sub_list):
 
 print('starting api call from DDI...')
 url = 'http://ipam.intel.com/mmws/api/Ranges'
-response = requests.get(url, proxies={'https': '', 'http': ''}, auth=('ad_nbardas', 'Nb)236254452236254452'),
+response = requests.get(url, proxies={'https': '', 'http': ''}, auth=(<username>, <password>),
                         verify=False,
                         timeout=100)
 
@@ -670,14 +670,14 @@ heritage_df = pd.DataFrame(rows)
 try:
     heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
 except:
-    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
     heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
 
 
 # In[62]:
 
 
-engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
 con = engine.connect()
 data_orig = pd.read_sql_query('select * from full_ipam_fragmentation where ("is_top_campusCode") or ("is_top_environment") or ("is_top_siteCode")', con=con)
 heritage_table = pd.read_sql_query('select * from heritage_table', con=con)
@@ -789,7 +789,7 @@ summary_final
 try:
     summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
 except:
-    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
     summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
 
 
@@ -797,10 +797,3 @@ except:
 
 
 summary_final
-
-
-# In[ ]:
-
-
-
-
