@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[73]:
+# In[1]:
 
 
 import warnings
 warnings.filterwarnings("ignore")
 
 import pip
-pckgs = ['pandas','ipaddress','numpy','tqdm','datetime','json','requests','sqlalchemy','xmltodict','re','psycopg2']
+pckgs = ['pandas','ipaddress','numpy','tqdm','datetime','json','requests','sqlalchemy','xmltodict','re','psycopg2','matplotlib','pickle']
 def import_or_install(package):
     try:
         __import__(package)
@@ -19,7 +19,7 @@ for p in pckgs:
     import_or_install(p)
 
 
-# In[18]:
+# In[2]:
 
 
 import pandas as pd
@@ -39,14 +39,14 @@ import re
 today = date.today()
 
 
-# In[19]:
+# In[3]:
 
 
-engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
+engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
 con = engine.connect()
 
 
-# In[20]:
+# In[4]:
 
 
 def address_exclude_collapse(net, ex_list):
@@ -62,7 +62,7 @@ def address_exclude_collapse(net, ex_list):
     return result
 
 
-# In[21]:
+# In[5]:
 
 
 def is_discovered(row):
@@ -71,14 +71,14 @@ def is_discovered(row):
     return 'never discovered'        
 
 
-# In[22]:
+# In[6]:
 
 
 def get_campusCode(row):
     return re.findall('([a-zA-Z ]*)\d*.*', row.BuildingCode)[0]
 
 
-# In[23]:
+# In[7]:
 
 
 def sort_value(row):
@@ -104,20 +104,20 @@ def sort_value(row):
     return f"{new_parts[0]}.{new_parts[1]}.{new_parts[2]}.{new_parts[3]}/{bit_part}"
 
 
-# In[24]:
+# In[8]:
 
 
-def get_children(node,childern_dict):
-    if node not in childern_dict.keys():
+def get_children(node,children_dict):
+    if node not in children_dict.keys():
         return []
-    children = childern_dict[node]
+    children = children_dict[node]
     for c in children:
-        grand_children = get_children(c,childern_dict)
+        grand_children = get_children(c,children_dict)
         children = children + grand_children
     return children
 
 
-# In[25]:
+# In[9]:
 
 
 def insert_to_db(engine,table_name,df,if_exists='append'):
@@ -131,10 +131,10 @@ def insert_to_db(engine,table_name,df,if_exists='append'):
         df2.to_sql(name=table_name, con=engine, if_exists = 'replace', index=False, method='multi',  chunksize=chunksize2)
 
 
-# In[26]:
+# In[10]:
 
 
-def get_sixteen_summary_table(site_code='all'):   
+def get_sixteen_summary_table(site_code='all', campus_code='all'):   
     data = []
     for parent in sixteens:
         try:
@@ -147,40 +147,50 @@ def get_sixteen_summary_table(site_code='all'):
         if site_code == 'all':
             desc_df = new_df[(new_df.Range.isin(descendants)) & (new_df.is_leaf == True)]
         else:
-            desc_df = new_df[(new_df.Range.isin(descendants)) & (new_df.is_leaf == True) & (new_df.new_siteCode == site_code)]
+            desc_df = new_df[(new_df.Range.isin(descendants)) & (new_df.is_leaf == True) & (new_df.new_siteCode == site_code) & (new_df.new_campusCode == campus_code)]
+            if desc_df.empty:
+                continue
              
         for env in envs:
             env_df = desc_df[desc_df.new_environment == env]
             
-            childern = list(env_df[env_df.is_discovered == 'never discovered'].Range)
-            output_list = list(map(ia.ip_network, childern))
+            children = list(env_df[env_df.is_discovered == 'never discovered'].Range)
+            output_list = list(map(ia.ip_network, children))
             data_dict[f'{env}_never_discovered'] = get_subnet_summary(output_list)
 
-            childern = list(env_df[env_df.is_discovered == 'free'].Range)
-            output_list = list(map(ia.ip_network, childern))
+            children = list(env_df[env_df.is_discovered == 'free'].Range)
+            output_list = list(map(ia.ip_network, children))
             data_dict[f'{env}_free'] = get_subnet_summary(output_list)
 
-            childern = list(env_df[env_df.is_discovered == 'in use'].Range)
-            output_list = list(map(ia.ip_network, childern))
+            children = list(env_df[env_df.is_discovered == 'in use'].Range)
+            output_list = list(map(ia.ip_network, children))
             data_dict[f'{env}_in_use'] = get_subnet_summary(output_list)
 
-            childern = list(env_df[env_df.is_discovered == 'last seen old'].Range)
-            output_list = list(map(ia.ip_network, childern))
+            children = list(env_df[env_df.is_discovered == 'last seen old'].Range)
+            output_list = list(map(ia.ip_network, children))
             data_dict[f'{env}_last_seen_old'] = get_subnet_summary(output_list)
+            
+            children = list(env_df[env_df.is_discovered == 'KEEP'].Range)
+            output_list = list(map(ia.ip_network, children))
+            data_dict[f'{env}_KEEP'] = get_subnet_summary(output_list)
+        
         data.append(data_dict)
 
     summary_df_sixteen = pd.DataFrame(data=data)
+    if summary_df_sixteen.empty:
+        return pd.DataFrame()
     summary_df_sixteen['sort_value'] = summary_df_sixteen.apply(sort_value, axis=1)
     summary_df_sixteen = summary_df_sixteen.sort_values('sort_value').drop('sort_value', axis=1).reset_index(drop=True)
     ranges = summary_df_sixteen['Range']
     summary_df_sixteen = summary_df_sixteen[sorted(summary_df_sixteen.columns)].drop(['Range'],axis=1)
     summary_df_sixteen.insert(loc=0, column='Range', value=ranges)
     summary_df_sixteen.insert(loc=1, column='site_code', value=site_code)
+    summary_df_sixteen.insert(loc=2, column='campus_code', value=campus_code)
     summary_df_sixteen['collection_date']  = today
-    return summary_df_sixteen.loc[summary_df_sixteen.drop(['Range','collection_date','site_code'], axis=1).dropna(how='all').index]
+    return summary_df_sixteen.loc[summary_df_sixteen.drop(['Range','collection_date','site_code','campus_code'], axis=1).dropna(how='all').index]
 
 
-# In[27]:
+# In[11]:
 
 
 def get_subnet_summary(sub_list):
@@ -201,14 +211,36 @@ def get_subnet_summary(sub_list):
         return nan
 
 
+# In[12]:
+
+
+def remove_asterisk(row,col):
+    try:
+        if ',' not in row[col]:
+            return row[col].replace("*","").strip()
+        else:
+            return str(sorted(list(set([x.replace("*","").strip() for x in eval(row[col])]))))
+    except:
+        return 'none'
+
+
+# In[13]:
+
+
+def fix_env_string(val):
+    if '[' not in val:
+        return val
+    return val if "," in val else eval(val)[0]
+
+
 # ### API call
 
-# In[28]:
+# In[14]:
 
 
 print('starting api call from DDI...')
 url = 'http://ipam.intel.com/mmws/api/Ranges'
-response = requests.get(url, proxies={'https': '', 'http': ''}, auth=(<username>, <password>),
+response = requests.get(url, proxies={'https': '', 'http': ''}, auth=('ad_nbardas', 'Nb_236254452236254452'),
                         verify=False,
                         timeout=100)
 
@@ -217,7 +249,7 @@ json_df = pd.DataFrame(myjson['result']['ranges'])
 json_df = json_df[~json_df.name.str.contains(':')].reset_index(drop=True)
 
 
-# In[29]:
+# In[15]:
 
 
 # create complete dataframe with all the data collected using API
@@ -232,15 +264,27 @@ df = pd.DataFrame(rows)
 print('finished api call from DDI...')
 
 
+# In[16]:
+
+
+deleted_df = pd.read_sql(fr"""select * from public."IPAM_deleted_ranges" """, con=engine)
+
+
+# In[17]:
+
+
+df = df[~df.Range.isin(deleted_df.Range)]
+
+
 # ### Transform
 
-# In[30]:
+# In[18]:
 
 
 df['last_seen_new'] = df['Last Seen'].apply(lambda x:  x.split(' ')[0] if (type(x) == str) else x)
 
 
-# In[31]:
+# In[19]:
 
 
 df['is_discovered'] = 'NA'
@@ -258,13 +302,13 @@ for idx,row in df.iterrows():
         df.at[idx, 'is_discovered'] = 'in use'
 
 
-# In[32]:
+# In[20]:
 
 
 df = df.drop(['Last Seen'],axis=1).rename({'last_seen_new':'Last Seen'}, axis=1)
 
 
-# In[33]:
+# In[21]:
 
 
 # remove all subnets too large or too big.
@@ -286,33 +330,66 @@ for idx,row in df.iterrows():
 df = df.drop(removables)
 
 
-# In[34]:
+# In[22]:
+
+
+sixteens = set([x for x in df.Range if '/16' in x])
+
+
+# In[23]:
 
 
 # remove all subnets not under allowed /16s.
 
-allowed = open("allowed_sixteens.txt", "r").read().split('\n')
 removables = list()
 df['sixteen_predecessor'] = 'none'
 for idx,row in df.iterrows():
     try:
         pred = ia.ip_network(row.Range).supernet(new_prefix=16).compressed
-        if pred not in allowed and row.Range != '0.0.0.0/0':
+        if (pred not in sixteens) and (row.Range != '0.0.0.0/0'):
             removables.append(idx)
         else:
             df.at[idx,'sixteen_predecessor'] = pred
     except:
         removables.append(idx)
+
+
+# In[24]:
+
+
+missing_sp = df.loc[removables]
 df = df.drop(removables)
 
 
-# In[35]:
+# In[25]:
+
+
+missing_sp = missing_sp.dropna(how='all',axis=1).reset_index(drop=True)[['Range', 'is_discovered','SiteCode', 'Last Seen', 'Title', 'BuildingCode', 'Netmask',
+       'DNSCode', 'Environment', 'Function', 'SysContact', 'Status', 'Region',
+       'Country', 'SiteName', 'IsTopLevel', 'RouteAdvertised', 'Range',
+       'is_subnet', 'utilization', 'SpaceID', 'EC Trusted', 'Gateway', 'Vlan',
+       'Location', 'SecurityRating', 'IPHelpers', 'InvalidFields', 'Routers',
+       'Approval Group']]
+missing_sp['collection_date'] = today
+
+
+# In[26]:
+
+
+try:
+    missing_sp.to_sql(name='IPAM_ranges_missing_st_pred', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(missing_sp.columns))
+except:
+    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    missing_sp.to_sql(name='IPAM_ranges_missing_st_pred', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(missing_sp.columns))
+
+
+# In[27]:
 
 
 # decide who is the immediate parent of each node
-# update childern dictionary - parent(IPv4Network): children(list of IPv4Networks)
+# update children dictionary - parent(IPv4Network): children(list of IPv4Networks)
 df['parent'] = 'NA'
-childern_dict = dict()
+children_dict = dict()
 for idx,row in df.iterrows():
     if row.Range == '0.0.0.0/0':
         continue
@@ -326,20 +403,20 @@ for idx,row in df.iterrows():
             parent = supernet
             break
     df.at[idx,'parent'] = parent
-    if parent in childern_dict: childern_dict[parent].append(net)
-    else: childern_dict[parent] = [net]
+    if parent in children_dict: children_dict[parent].append(net)
+    else: children_dict[parent] = [net]
 
 
 # ### finding free subnets
 
-# In[36]:
+# In[28]:
 
 
 print('organizing children subnets...')
-childern_dict_collapsed = {k:list(ia.collapse_addresses(v)) for (k,v) in childern_dict.items()}
+children_dict_collapsed = {k:list(ia.collapse_addresses(v)) for (k,v) in children_dict.items()}
 
 print('organizing free subnets...')
-free_space = {k:address_exclude_collapse(ia.ip_network(k),v) for (k,v) in childern_dict_collapsed.items()}
+free_space = {k:address_exclude_collapse(ia.ip_network(k),v) for (k,v) in children_dict_collapsed.items()}
 
 rows = []
 for k,v in free_space.items():
@@ -351,7 +428,7 @@ for k,v in free_space.items():
 free_df = pd.DataFrame(rows, columns=[['parent','is_discovered','Range','sixteen_predecessor']])
 
 
-# In[37]:
+# In[29]:
 
 
 tmp = df.head(0).copy()
@@ -369,12 +446,12 @@ new_df = new_df.sort_values('sort_value')[['Range','parent','sixteen_predecessor
        'SysContact', 'Netmask', 'IPHelpers', 'Country', 'SiteName',
        'Approval Group', 'Last Seen', 'SecurityRating', 'SpaceID',
        'collection_date']]
-new_df = new_df[((new_df.Range.isin(allowed)) | (new_df.sixteen_predecessor.isin(allowed)) | (new_df.Range == '0.0.0.0/0'))].reset_index(drop=True)
+new_df = new_df[((new_df.Range.isin(sixteens)) | (new_df.sixteen_predecessor.isin(sixteens)) | (new_df.Range == '0.0.0.0/0'))].reset_index(drop=True)
 
 
 # ### add correct environment and siteCode
 
-# In[38]:
+# In[30]:
 
 
 print("organizing environments and site codes...")
@@ -382,35 +459,29 @@ parents = set(new_df.parent)
 new_df['is_leaf'] = new_df['Range'].apply(lambda x: False if x in parents else True)
 
 
-# In[39]:
+# In[31]:
 
 
-childern_dict = dict()
+children_dict = dict()
 for idx, row in new_df.iterrows():
     range_, parent_ = row.Range, row.parent
-    if parent_ not in childern_dict:
-        childern_dict[parent_] = [range_]
+    if parent_ not in children_dict:
+        children_dict[parent_] = [range_]
     else:
-        childern_dict[parent_].append(range_)
+        children_dict[parent_].append(range_)
 
 
-# In[40]:
+# In[32]:
 
 
 extended_children_dict = dict()
-for node in childern_dict.keys():
+for node in children_dict.keys():
     if type(node) == float:
         continue
-    extended_children_dict[node] = get_children(node,childern_dict)
+    extended_children_dict[node] = get_children(node,children_dict)
 
 
-# In[41]:
-
-
-# new_df['campusCode'] = new_df[new_df.BuildingCode.notna()].apply(get_campusCode, axis=1)
-
-
-# In[42]:
+# In[33]:
 
 
 for idx, row in tqdm(new_df[new_df.is_discovered != 'free'].fillna("none").iterrows()):
@@ -431,19 +502,19 @@ for idx, row in tqdm(new_df[new_df.is_discovered != 'free'].fillna("none").iterr
     new_df.at[idx, 'new_BuildingCode'] = bc
 
 
-# In[43]:
+# In[34]:
 
 
 building_df = pd.read_sql_query('select "BuildingCd", "CampusCd" from building_inventory', con=con).rename({'BuildingCd':'new_BuildingCode','CampusCd':'CampusCode'}, axis=1)
 
 
-# In[44]:
+# In[35]:
 
 
 new_df = new_df.merge(building_df, how='left', on='new_BuildingCode')
 
 
-# In[45]:
+# In[36]:
 
 
 # decide on environment and siteCode
@@ -501,13 +572,13 @@ for idx, row in tqdm(new_df[new_df.is_discovered != 'free'].fillna("none").iterr
     new_df.at[idx, 'new_campusCode'] = cc
 
 
-# In[46]:
+# In[37]:
 
 
 new_df.drop(['CampusCode'], axis=1, inplace=True)
 
 
-# In[47]:
+# In[38]:
 
 
 for idx,row in tqdm(new_df[new_df.is_discovered == 'free'].iterrows()):
@@ -517,7 +588,16 @@ for idx,row in tqdm(new_df[new_df.is_discovered == 'free'].iterrows()):
     new_df.at[idx, 'new_campusCode'] = parent_data[2]
 
 
-# In[48]:
+# In[39]:
+
+
+new_df['new_BuildingCode'] = new_df.apply(lambda row: remove_asterisk(row,'new_BuildingCode'), axis=1)
+new_df['new_environment'] = new_df.apply(lambda row: remove_asterisk(row,'new_environment'), axis=1)
+new_df['new_campusCode'] = new_df.apply(lambda row: remove_asterisk(row,'new_campusCode'), axis=1)
+new_df['new_siteCode'] = new_df.apply(lambda row: remove_asterisk(row,'new_siteCode'), axis=1)
+
+
+# In[40]:
 
 
 # get top of subtrees (environment and site)
@@ -559,43 +639,122 @@ for idx,row in tqdm(camp_df.iterrows()):
         new_df.at[idx,'is_top_campusCode'] = True
 
 
-# In[49]:
+# In[41]:
 
 
 new_df.fillna({'is_top_siteCode':False, 'is_top_environment':False,'is_top_campusCode':False}, inplace=True)
 
 
+# In[42]:
+
+
+new_df['sort_value'] = new_df.apply(sort_value,axis=1)
+
+
+# In[43]:
+
+
+new_df = new_df.sort_values("sort_value").drop("sort_value", axis=1).reset_index(drop=True)
+
+
+# In[44]:
+
+
+new_df['new_BuildingCode'] = new_df['new_BuildingCode'].apply(fix_env_string)
+new_df['new_environment'] = new_df['new_environment'].apply(fix_env_string)
+new_df['new_campusCode'] = new_df['new_campusCode'].apply(fix_env_string)
+new_df['new_siteCode'] = new_df['new_siteCode'].apply(fix_env_string)
+
+
+# ### Adding Keep ranges 
+
+# In[45]:
+
+
+reserved_df = pd.read_sql_query('select * from public."IPAM_reserved_ranges"', engine)
+
+
+# In[46]:
+
+
+for i in list(new_df[new_df.Range.isin(reserved_df.Range)].index):
+    new_df.at[i,'is_discovered'] = 'KEEP'
+
+
+# In[47]:
+
+
+prev_frag_df = pd.read_sql(rf"""select * from public."IPAM_full_fragmentation" where (is_leaf)""", engine)
+
+
+# In[48]:
+
+
+joined_df = prev_frag_df.merge(new_df[new_df.is_leaf == True], how='outer', on="Range", suffixes=["_old","_new"])
+joined_df = joined_df[joined_df.is_discovered_old != joined_df.is_discovered_new]
+
+
+# In[49]:
+
+
+joined_df = joined_df[["Range","is_discovered_old","is_discovered_new","new_environment_old","new_environment_new"]]#.value_counts("is_discovered_new")
+joined_df["collection_date"] = today
+
+
 # In[50]:
 
 
-new_df
+# joined_df["process"] = joined_df.apply(lambda row: str(row.is_discovered_old) + " ---> " + str(row.is_discovered_new), axis=1)
+
+
+# In[51]:
+
+
+joined_df = joined_df[(joined_df.is_discovered_old != 'free') & (joined_df.is_discovered_new != 'free')].sort_values("is_discovered_new").fillna("N\A").reset_index(drop=True)
+
+
+# In[52]:
+
+
+joined_df
+
+
+# In[53]:
+
+
+try:
+    joined_df.to_sql(name='IPAM_cleanup_status_changes', con=engine, if_exists = 'append', index=False, method='multi',  chunksize = 2097 // len(joined_df.columns))
+except:
+    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    joined_df.to_sql(name='IPAM_cleanup_status_changes', con=engine, if_exists = 'append', index=False, method='multi',  chunksize = 2097 // len(joined_df.columns))
 
 
 # ### Data Storage
 
-# In[51]:
+# In[54]:
 
 
 # # CSV local backup
 # new_df.to_csv("ordered_subnets.csv", index = False)
 
 
-# In[52]:
+# In[55]:
 
 
 # new_df = pd.read_csv('ordered_subnets.csv')
 
 
-# In[53]:
+# In[56]:
 
 
-# SQL db insertion
-print("inserting to db...")
-new_df.to_sql(name='full_ipam_fragmentation', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(new_df.columns))
-print("db updated with IPAM transformed data...")
+try:
+    new_df.to_sql(name='IPAM_full_fragmentation', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(new_df.columns))
+except:
+    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    new_df.to_sql(name='IPAM_full_fragmentation', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(new_df.columns))
 
 
-# In[54]:
+# In[57]:
 
 
 new_df.to_csv("ordered_subnets.csv", index = False)
@@ -603,55 +762,73 @@ new_df.to_csv("ordered_subnets.csv", index = False)
 
 # ### allowed /16 subnet handling
 
-# In[55]:
+# In[58]:
 
 
 print("handling /16 subnets' summaries...")
 sixteens = list(new_df[(new_df.Range.str.contains("/16")) & (new_df.is_discovered != 'free')].Range)
 envs = list(list(new_df[~new_df.new_environment.str.contains(',')].new_environment.fillna('none').unique()))
-scs = ["all"] + list(list(new_df[~new_df.new_campusCode.str.contains(',')].new_campusCode.fillna('none').unique()))
 
+df1 = new_df[(~new_df.new_siteCode.str.contains(',')) & (~new_df.new_campusCode.str.contains(','))]
 
-# In[56]:
-
-
-data_frames = []
-for sc in tqdm(scs):
-    data_frames.append(get_sixteen_summary_table(sc))
-
-
-# In[57]:
-
-
-total_sixteen = pd.concat(data_frames)
-total_sixteen = total_sixteen.dropna(how='all', axis=1)
-
-
-# In[58]:
-
-
-# total_sixteen.to_csv('subnet_tree_summary_sixteens.csv', index=False)
-
-
-# In[75]:
-
-
-total_sixteen
+gb_df = df1.groupby(['new_siteCode','new_campusCode']).size().reset_index().rename(columns={0:'count'})
+gb_df = gb_df.mask(gb_df.eq('none')).dropna().mask(gb_df.eq('Missing')).dropna().mask(gb_df.eq('RESERVED')).dropna().drop(['count'], axis=1)
+records = list(gb_df.to_records(index=False))
 
 
 # In[59]:
 
 
+data_frames = []
+
+for record in tqdm(records): 
+    data_frames.append(get_sixteen_summary_table(*record))
+
+data_frames.append(get_sixteen_summary_table('all','all'))
+
+
+# In[60]:
+
+
+total_sixteen = pd.concat(data_frames).reset_index(drop=True)
+# total_sixteen = total_sixteen.dropna(how='all', axis=1)
+
+
+# In[61]:
+
+
+# total_sixteen.to_csv('subnet_tree_summary_sixteens.csv', index=False)
+
+
+# In[62]:
+
+
 try:
-    total_sixteen.to_sql(name='sixteens_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(total_sixteen.columns))
+    total_sixteen.to_sql(name='IPAM_sixteens_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(total_sixteen.columns))
 except:
     engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
-    total_sixteen.to_sql(name='sixteens_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(total_sixteen.columns))
+    total_sixteen.to_sql(name='IPAM_sixteens_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(total_sixteen.columns))
+
+
+# In[63]:
+
+
+total_sixteen
+
+
+# In[64]:
+
+
+# *** TODO: add roles to data table! add to all tabels that are replaced! ***
+
+# GRANT SELECT ON TABLE public.sixteens_summary TO splunk_reader;
+
+# GRANT SELECT ON TABLE public.sixteens_summary TO elk_reader;
 
 
 # ### top environment\siteCode\campusCode trees handling
 
-# In[60]:
+# In[65]:
 
 
 # create heritage table
@@ -662,138 +839,139 @@ for pred,succ_list in extended_children_dict.items():
     for succ in succ_list:
         rows.append({"predecessor":pred, "successor": succ})
 heritage_df = pd.DataFrame(rows)
-
-
-# In[61]:
-
-
-try:
-    heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
-except:
-    engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
-    heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
-
-
-# In[62]:
-
-
-engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
-con = engine.connect()
-data_orig = pd.read_sql_query('select * from full_ipam_fragmentation where ("is_top_campusCode") or ("is_top_environment") or ("is_top_siteCode")', con=con)
-heritage_table = pd.read_sql_query('select * from heritage_table', con=con)
-
-
-# In[63]:
-
-
-filtered_df = data_orig.copy()
-ranges = list(filtered_df.Range)
-data = []
-
-
-# In[64]:
-
-
-ranges = list(filtered_df.Range)
-data = []
-for parent in tqdm(ranges):
-    try:
-        descendants = list(heritage_table[heritage_table.predecessor == parent].successor)
-        if not descendants:
-            descendants = [parent]
-    except:
-        descendants = [parent]
-    data_dict = dict()
-    data_dict['Range'] = parent
-
-
-    desc_df = filtered_df[(filtered_df.Range.isin(descendants)) & (filtered_df.is_leaf == True)]
-
-    for env in envs:
-        env_df = desc_df[desc_df.new_environment == env]
-
-        childern = list(env_df[env_df.is_discovered == 'never discovered'].Range)
-        output_list = list(map(ia.ip_network, childern))
-        data_dict[f'{env}_never_discovered'] = get_subnet_summary(output_list)
-
-        childern = list(env_df[env_df.is_discovered == 'free'].Range)
-        output_list = list(map(ia.ip_network, childern))
-        data_dict[f'{env}_free'] = get_subnet_summary(output_list)
-
-        childern = list(env_df[env_df.is_discovered == 'in use'].Range)
-        output_list = list(map(ia.ip_network, childern))
-        data_dict[f'{env}_in_use'] = get_subnet_summary(output_list)
-
-        childern = list(env_df[env_df.is_discovered == 'last seen old'].Range)
-        output_list = list(map(ia.ip_network, childern))
-        data_dict[f'{env}_last_seen_old'] = get_subnet_summary(output_list)
-    data.append(data_dict)
-
-
-# In[65]:
-
-
-summary_df = pd.DataFrame(data=data)
-summary_df['sort_value'] = summary_df.apply(sort_value, axis=1)
-summary_df = summary_df.sort_values('sort_value').drop('sort_value', axis=1).reset_index(drop=True)
-ranges = summary_df['Range']
-summary_df = summary_df[sorted(summary_df.columns)].drop(['Range'],axis=1)
-summary_df.insert(loc=0, column='Range', value=ranges)
-summary_df.insert(loc=1, column='site_code', value="all")
-summary_df['collection_date']  = today
-summary_df = summary_df.loc[summary_df.drop(['Range','collection_date','site_code'], axis=1).dropna(how='all').index]
+heritage_df['collection_date'] = today
 
 
 # In[66]:
 
 
-summary_df = summary_df[[col for col in summary_df.columns if ',' not in col]].dropna(how='all', axis=1)
+try:
+    heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
+except:
+    engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+    heritage_df.to_sql(name='heritage_table', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(heritage_df.columns))
 
 
 # In[67]:
 
 
-summary_df.to_csv("summary_data.csv", index=False)
+# engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+# con = engine.connect()
+# data_orig = pd.read_sql_query('select * from public."IPAM_full_fragmentation" where ("is_top_campusCode") or ("is_top_environment") or ("is_top_siteCode")', con=con)
+# heritage_table = pd.read_sql_query('select * from heritage_table', con=con)
 
 
 # In[68]:
 
 
-aux_df = new_df[['Range','new_environment','new_siteCode','new_campusCode','is_top_siteCode','is_top_environment','is_top_campusCode']].copy()
+# filtered_df = data_orig.copy()
+# ranges = list(filtered_df.Range)
+# data = []
 
 
 # In[69]:
 
 
-summary_final = summary_df.merge(aux_df, left_on='Range', right_on='Range', how='left').drop('site_code', axis=1)
+# ranges = list(filtered_df.Range)
+# data = []
+# for parent in tqdm(ranges):
+#     try:
+#         descendants = list(heritage_table[heritage_table.predecessor == parent].successor)
+#         if not descendants:
+#             descendants = [parent]
+#     except:
+#         descendants = [parent]
+#     data_dict = dict()
+#     data_dict['Range'] = parent
+
+
+#     desc_df = filtered_df[(filtered_df.Range.isin(descendants)) & (filtered_df.is_leaf == True)]
+    
+#     if desc_df.empty:
+#         continue
+
+#     for env in envs:
+#         env_df = desc_df[desc_df.new_environment == env]
+
+#         children = list(env_df[env_df.is_discovered == 'never discovered'].Range)
+#         output_list = list(map(ia.ip_network, children))
+#         data_dict[f'{env}_never_discovered'] = get_subnet_summary(output_list)
+
+#         children = list(env_df[env_df.is_discovered == 'free'].Range)
+#         output_list = list(map(ia.ip_network, children))
+#         data_dict[f'{env}_free'] = get_subnet_summary(output_list)
+
+#         children = list(env_df[env_df.is_discovered == 'in use'].Range)
+#         output_list = list(map(ia.ip_network, children))
+#         data_dict[f'{env}_in_use'] = get_subnet_summary(output_list)
+
+#         children = list(env_df[env_df.is_discovered == 'last seen old'].Range)
+#         output_list = list(map(ia.ip_network, children))
+#         data_dict[f'{env}_last_seen_old'] = get_subnet_summary(output_list)
+#     data.append(data_dict)
 
 
 # In[70]:
 
 
-top_cols = ['Range','new_environment', 'new_siteCode', 'new_campusCode']
-bttm_cols = ['is_top_environment','is_top_siteCode','is_top_campusCode','collection_date']
-cols = top_cols + sorted([col for col in summary_final.columns if col not in top_cols + bttm_cols]) + bttm_cols
-summary_final = summary_final[cols]
+# summary_df = pd.DataFrame(data=data)
+# summary_df['sort_value'] = summary_df.apply(sort_value, axis=1)
+# summary_df = summary_df.sort_values('sort_value').drop('sort_value', axis=1).reset_index(drop=True)
+# ranges = summary_df['Range']
+# summary_df = summary_df[sorted(summary_df.columns)].drop(['Range'],axis=1)
+# summary_df.insert(loc=0, column='Range', value=ranges)
+# summary_df.insert(loc=1, column='site_code', value="all")
+# summary_df['collection_date']  = today
+# summary_df = summary_df.loc[summary_df.drop(['Range','collection_date','site_code'], axis=1).dropna(how='all').index]
 
 
 # In[71]:
 
 
-summary_final
+# summary_df = pd.DataFrame(data=data)
+
+# summary_df
 
 
 # In[72]:
 
 
-try:
-    summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
-except:
-    engine = create_engine('postgresql://<username>:<password>@<host>:<port>/<db_name>')
-    summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
+# summary_df = summary_df[[col for col in summary_df.columns if ',' not in col]].dropna(how='all', axis=1)
+
+
+# In[73]:
+
+
+# summary_df.to_csv("summary_data.csv", index=False)
 
 
 # In[74]:
 
 
-summary_final
+# aux_df = new_df[['Range','new_environment','new_siteCode','new_campusCode','is_top_siteCode','is_top_environment','is_top_campusCode']].copy()
+
+
+# In[75]:
+
+
+# summary_final = summary_df.merge(aux_df, left_on='Range', right_on='Range', how='left').drop('site_code', axis=1)
+
+
+# In[76]:
+
+
+# top_cols = ['Range','new_environment', 'new_siteCode', 'new_campusCode']
+# bttm_cols = ['is_top_environment','is_top_siteCode','is_top_campusCode','collection_date']
+# cols = top_cols + sorted([col for col in summary_final.columns if col not in top_cols + bttm_cols]) + bttm_cols
+# summary_final = summary_final[cols]
+
+
+# In[77]:
+
+
+# try:
+#     summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
+# except:
+#     engine = create_engine('postgresql://cppmapi_so:dKqZpJmKz2n11Dq@postgres5561-lb-fm-in.iglb.intel.com:5433/cppmapi')
+#     summary_final.to_sql(name='top_summary', con=engine, if_exists = 'replace', index=False, method='multi',  chunksize = 2097 // len(summary_final.columns))
+
